@@ -15,22 +15,28 @@ UNSET = object()
 
 
 class SubdomainMiddleware(object):
+
     """
     A middleware class that adds a ``subdomain`` attribute to the current request.
     """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
     def get_domain_for_request(self, request):
+
         """
         Returns the domain that will be used to identify the subdomain part
         for this request.
         """
+
         return get_domain()
 
-    def process_request(self, request):
+    def __call__(self, request):
         """
         Adds a ``subdomain`` attribute to the ``request`` parameter.
         """
-        domain, host = map(lower,
-            (self.get_domain_for_request(request), request.get_host()))
+        domain, host = map(lower, (self.get_domain_for_request(request), request.get_host()))
 
         pattern = r'^(?:(?P<subdomain>.*?)\.)?%s(?::.*)?$' % re.escape(domain)
         matches = re.match(pattern, host)
@@ -39,37 +45,44 @@ class SubdomainMiddleware(object):
             request.subdomain = matches.group('subdomain')
         else:
             request.subdomain = None
-            logger.warning('The host %s does not belong to the domain %s, '
-                'unable to identify the subdomain for this request',
-                request.get_host(), domain)
+            logger.warning('The host %s does not belong to the domain %s, ' 'unable to identify the subdomain for this request', request.get_host(), domain)
+
+        return self.get_response(request)
 
 
 class SubdomainURLRoutingMiddleware(SubdomainMiddleware):
+
     """
     A middleware class that allows for subdomain-based URL routing.
     """
-    def process_request(self, request):
+
+    def __call__(self, request):
+
         """
         Sets the current request's ``urlconf`` attribute to the urlconf
         associated with the subdomain, if it is listed in
         ``settings.SUBDOMAIN_URLCONFS``.
         """
-        super(SubdomainURLRoutingMiddleware, self).process_request(request)
+
+        response = super(SubdomainURLRoutingMiddleware, self).__call__(request)
 
         subdomain = getattr(request, 'subdomain', UNSET)
 
         if subdomain is not UNSET:
             urlconf = settings.SUBDOMAIN_URLCONFS.get(subdomain)
             if urlconf is not None:
-                logger.debug("Using urlconf %s for subdomain: %s",
-                    repr(urlconf), repr(subdomain))
+                logger.debug("Using urlconf %s for subdomain: %s", repr(urlconf), repr(subdomain))
                 request.urlconf = urlconf
 
-    def process_response(self, request, response):
+        return self.process_response(response)
+
+    def process_response(self, response):
+
         """
         Forces the HTTP ``Vary`` header onto requests to avoid having responses
         cached across subdomains.
         """
+
         if getattr(settings, 'FORCE_VARY_ON_HOST', True):
             patch_vary_headers(response, ('Host',))
 
